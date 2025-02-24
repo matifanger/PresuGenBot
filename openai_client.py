@@ -22,7 +22,7 @@ def generate_markdown(historial):
                 "**Fecha:** [fecha]\n\n**Propietaria:** [nombre]\n\n**Dirección:** [dirección]\n\n"
                 "**Contacto:** [contacto]\n\n---\n\n### **Presupuesto por Mano de Obra**\n\n"
                 "### **Trabajos a Realizar:**\n\n1. [trabajo 1]\n2. [trabajo 2]\n...\n\n---\n\n"
-                "### **Costo Total del Proyecto:** $[monto] ARS\n\n---\n\n### **Materiales Aproximados:**\n\n- [material 1]\n- [material 2]\n...\n\n"
+                "### **Costo Total del Proyecto:** $[monto]\n\n---\n\n### **Materiales Aproximados:**\n\n- [material 1]\n- [material 2]\n...\n\n"
                 "Todo campo faltante, ya sea propietario, contacto, dirección, trabajos a realizar, materiales aproximados, etc... deben ser OMITIDOS."
                 "Si falta el contacto, no envies: Contacto: [Contacto]. Simplemente no envies el campo."
                 "Si hay información extra, debe ser agregada de manera ordenada y estructurada, de la manera mas conveniente para el usuario."
