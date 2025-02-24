@@ -14,7 +14,7 @@ CSS_ESTILO = """
         padding: 0.5cm;  /* Padding interno más ajustado */
     }
     h1 {
-        font-size: 18pt;
+        font-size: 20pt;
         font-weight: bold;
         color: black;
         text-align: center;
