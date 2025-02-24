@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y \
     libgdk-pixbuf2.0-0 \
     libpangocairo-1.0-0 \
     libcairo2 \
-    libgobject-2.0-0 \
+    libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
