@@ -9,7 +9,7 @@ historias = {}
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_bienvenida = (
         "¡Hola! Soy tu bot de presupuestos. Aquí te explico cómo usarme:\n\n"
-        "1. Enviame un solo mensaje con todos los detalles del presupuesto (fecha, dirección, trabajos, materiales, costo, etc.).\n"
+        "1. Enviame un solo mensaje con todos los detalles del presupuesto (fecha, dirección, contacto, trabajos, materiales, costo, etc.).\n"
         "2. Te voy a enviar un PDF con el presupuesto formateado.\n"
         "3. Si querés modificar un presupuesto, respondé al mensaje con el PDF y decime qué cambiar.\n"
         "4. Usá /start para ver estas instrucciones de nuevo.\n\n"
