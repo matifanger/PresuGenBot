@@ -1,11 +1,15 @@
-import openai
+from openai import OpenAI
 import json
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+
+client = OpenAI(
+    api_key=os.getenv("OPENAI_API_KEY"),
+    base_url="https://openrouter.ai/api/v1"
+)
 
 class Budget(BaseModel):
     pdf_title: str
@@ -33,7 +37,7 @@ def generate_markdown(historial):
         ] + historial
 
         # Nueva sintaxis con response_format para forzar JSON
-        response = openai.beta.chat.completions.parse(
+        response = client.beta.chat.completions.parse(
             model="gpt-4o-mini",
             messages=prompt,
             max_tokens=5000,
