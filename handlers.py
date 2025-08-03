@@ -50,4 +50,5 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         historias[user_id].append({"role": "assistant", "content": json_response["content"]})
 
     except Exception as e:
+        print(e)
         await update.message.reply_text(f"No pude procesar tu solicitud. Por favor, intentá de nuevo.")
