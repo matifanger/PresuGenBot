@@ -8,7 +8,7 @@ load_dotenv()
 
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
-    base_url="https://openrouter.ai/api/v1"
+    base_url=os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1"
 )
 
 class Budget(BaseModel):
