@@ -38,10 +38,10 @@ python main.py
 ## 🐳 Docker
 ```bash
 # Construir la imagen
-docker build -t PresuGenBot .
+docker build -t presugenbot .
 
 # Ejecutar el contenedor
-docker run -d --env-file .env PresuGenBot
+docker run -d --env-file .env presugenbot
 ```
 
 ## 📝 Licencia
