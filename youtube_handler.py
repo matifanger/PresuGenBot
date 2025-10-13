@@ -1,4 +1,4 @@
-import yt_dlp
+from pytubefix import YouTube
 import os
 import re
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -55,41 +55,30 @@ async def handle_youtube_callback(update: Update, context: ContextTypes.DEFAULT_
 async def download_audio(query, context: ContextTypes.DEFAULT_TYPE, url: str):
     """Descarga solo el audio del video de YouTube"""
     try:
-        # Configuración para descargar audio
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': True,
-            'no_warnings': True,
-            # Configuraciones para evitar detección de bot
-            'nocheckcertificate': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-            'age_limit': None,
-        }
-        
         # Crear directorio de descargas si no existe
         os.makedirs('downloads', exist_ok=True)
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            # Cambiar extensión a mp3
-            audio_file = os.path.splitext(filename)[0] + '.mp3'
+        # Crear objeto YouTube
+        yt = YouTube(url)
+        
+        # Obtener el stream de audio de mejor calidad
+        audio_stream = yt.streams.filter(only_audio=True).order_by('abr').desc().first()
+        
+        if not audio_stream:
+            await query.edit_message_text("❌ No se pudo encontrar un stream de audio.")
+            return
+        
+        # Descargar el audio
+        audio_file = audio_stream.download(output_path='downloads')
         
         # Enviar el archivo de audio
         with open(audio_file, 'rb') as audio:
             await context.bot.send_audio(
                 chat_id=query.message.chat_id,
                 audio=audio,
-                title=info.get('title', 'Audio'),
-                performer=info.get('uploader', 'YouTube'),
-                duration=int(info.get('duration', 0)),
+                title=yt.title,
+                performer=yt.author,
+                duration=int(yt.length),
                 read_timeout=60,
                 write_timeout=60,
                 connect_timeout=60
@@ -107,6 +96,8 @@ async def download_audio(query, context: ContextTypes.DEFAULT_TYPE, url: str):
             
     except Exception as e:
         print(f"Error descargando audio: {e}")
+        import traceback
+        traceback.print_exc()
         # Intentar enviar mensaje de error, pero no fallar si hay timeout
         try:
             await query.edit_message_text(f"❌ Error al descargar el audio. Por favor, intentá de nuevo.")
@@ -116,31 +107,22 @@ async def download_audio(query, context: ContextTypes.DEFAULT_TYPE, url: str):
 async def download_video(query, context: ContextTypes.DEFAULT_TYPE, url: str):
     """Descarga el video con audio de YouTube"""
     try:
-        # Configuración para descargar video
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'merge_output_format': 'mp4',
-            'quiet': True,
-            'no_warnings': True,
-            # Configuraciones para evitar detección de bot
-            'nocheckcertificate': True,
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'extractor_args': {'youtube': {'player_client': ['android', 'web']}},
-            'age_limit': None,
-        }
-        
         # Crear directorio de descargas si no existe
         os.makedirs('downloads', exist_ok=True)
         
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            # Asegurar extensión mp4
-            if not filename.endswith('.mp4'):
-                video_file = os.path.splitext(filename)[0] + '.mp4'
-            else:
-                video_file = filename
+        # Crear objeto YouTube
+        yt = YouTube(url)
+        
+        # Obtener el stream de video con audio de mejor calidad (progressive streams)
+        # Progressive streams incluyen audio y video juntos
+        video_stream = yt.streams.filter(progressive=True, file_extension='mp4').order_by('resolution').desc().first()
+        
+        if not video_stream:
+            await query.edit_message_text("❌ No se pudo encontrar un stream de video.")
+            return
+        
+        # Descargar el video
+        video_file = video_stream.download(output_path='downloads')
         
         # Verificar tamaño del archivo
         file_size = os.path.getsize(video_file)
@@ -161,10 +143,8 @@ async def download_video(query, context: ContextTypes.DEFAULT_TYPE, url: str):
                 await context.bot.send_video(
                     chat_id=query.message.chat_id,
                     video=video,
-                    caption=info.get('title', 'Video'),
-                    duration=int(info.get('duration', 0)),
-                    width=info.get('width'),
-                    height=info.get('height'),
+                    caption=yt.title,
+                    duration=int(yt.length),
                     supports_streaming=True,
                     read_timeout=120,
                     write_timeout=120,
@@ -183,6 +163,8 @@ async def download_video(query, context: ContextTypes.DEFAULT_TYPE, url: str):
             
     except Exception as e:
         print(f"Error descargando video: {e}")
+        import traceback
+        traceback.print_exc()
         # Intentar enviar mensaje de error, pero no fallar si hay timeout
         try:
             await query.edit_message_text(f"❌ Error al descargar el video. Por favor, intentá de nuevo.")
