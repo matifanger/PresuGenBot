@@ -11,6 +11,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import TimeoutException
+from urllib.parse import urlparse
 
 def is_youtube_url(url: str) -> bool:
     """Verifica si la URL es de YouTube"""
@@ -65,6 +66,37 @@ async def handle_youtube_callback(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text("🎬 Procesando video... Por favor esperá (puede tardar 30-60 seg).")
         await download_video(query, context, url)
 
+def _parse_proxy_from_env():
+    """Lee PROXY_FULL del entorno y devuelve un dict con partes o None si no hay proxy.
+
+    Espera formato: protocol://username:password@server:port
+    """
+    proxy_full = os.getenv('PROXY_FULL') or os.getenv('PROXY_URL') or os.getenv('PROXY')
+    if not proxy_full:
+        return None
+
+    try:
+        parsed = urlparse(proxy_full)
+        protocol = parsed.scheme or 'http'
+        username = parsed.username or ''
+        password = parsed.password or ''
+        server = parsed.hostname or ''
+        port = parsed.port or 80
+
+        # Reconstruir la URL completa sin escapados raros
+        full = f"{protocol}://{username}:{password}@{server}:{port}"
+
+        return {
+            'server': server,
+            'port': port,
+            'username': username,
+            'password': password,
+            'protocol': protocol,
+            'full': full,
+        }
+    except Exception:
+        return None
+
 def create_driver(download_path=None):
     """Crea un driver de Chrome para scraping con descargas configuradas"""
     try:
@@ -95,8 +127,36 @@ def create_driver(download_path=None):
         }
         chrome_options.add_experimental_option("prefs", prefs)
         
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        # Proxy (opcional)
+        proxy_cfg = _parse_proxy_from_env()
+        if proxy_cfg and proxy_cfg.get('server'):
+            try:
+                # Usar selenium-wire para soporte de proxy con auth
+                from seleniumwire import webdriver as wire_webdriver
+
+                # Añadir flag --proxy-server para Chrome
+                chrome_options.add_argument(f"--proxy-server={proxy_cfg['protocol']}://{proxy_cfg['server']}:{proxy_cfg['port']}")
+
+                seleniumwire_options = {
+                    'proxy': {
+                        'http': proxy_cfg['full'],
+                        'https': proxy_cfg['full'],
+                    },
+                }
+
+                service = Service(ChromeDriverManager().install())
+                driver = wire_webdriver.Chrome(service=service, options=chrome_options, seleniumwire_options=seleniumwire_options)
+
+                # Log sin contraseña
+                masked = f"{proxy_cfg['protocol']}://{proxy_cfg['username']}:****@{proxy_cfg['server']}:{proxy_cfg['port']}"
+                print(f"[DEBUG] Driver con proxy configurado: {masked}")
+            except Exception as e:
+                print(f"[WARN] No se pudo inicializar con proxy, usando sin proxy: {e}")
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+        else:
+            service = Service(ChromeDriverManager().install())
+            driver = webdriver.Chrome(service=service, options=chrome_options)
         
         print(f"[DEBUG] Driver creado con carpeta de descargas: {download_path}")
         return driver
