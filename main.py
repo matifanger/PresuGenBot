@@ -1,5 +1,6 @@
-from telegram.ext import Application, CommandHandler, MessageHandler, filters
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 from handlers import start, handle_message
+from youtube_handler import handle_youtube_callback
 from dotenv import load_dotenv
 import os
 
@@ -20,6 +21,7 @@ def main():
     # Añadir manejadores
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_handler(CallbackQueryHandler(handle_youtube_callback, pattern='^yt_'))
     
     # Iniciar el bot
     app.run_polling()
