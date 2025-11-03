@@ -158,6 +158,18 @@ def create_driver(download_path=None):
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
         
+        # Configurar timeouts largos (10 minutos)
+        try:
+            driver.command_executor.set_timeout(600)
+        except Exception as timeout_err:
+            print(f"[WARN] No se pudo ajustar timeout del command executor: {timeout_err}")
+
+        try:
+            driver.set_page_load_timeout(600)
+            driver.set_script_timeout(600)
+        except Exception as timeout_err:
+            print(f"[WARN] No se pudieron ajustar los timeouts de page/script: {timeout_err}")
+
         print(f"[DEBUG] Driver creado con carpeta de descargas: {download_path}")
         return driver
         
