@@ -7,6 +7,7 @@ Bot de Telegram para crear presupuestos rapidos y sencillos.
 
 ## ✨ Características
 - Genera un PDF a partir de un texto en formato MD, usando IA: gpt-4o-mini.
+- Descarga videos de YouTube e Instagram directamente en Telegram.
 
 ## 🛠️ Instalación
 

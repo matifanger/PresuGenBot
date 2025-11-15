@@ -1,11 +1,18 @@
+import re
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from openai_client import generate_markdown
 from pdf_generator import generate_pdf
 from youtube_handler import is_youtube_url, handle_youtube_link
+from social_media_handler import (
+    is_instagram_url,
+    handle_instagram_video,
+)
 
 # Historial de mensajes por usuario
 historias = {}
+URL_REGEX = re.compile(r'(https?://|www\.)\S+', re.IGNORECASE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje_bienvenida = (
@@ -18,6 +25,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. Enviame un link de YouTube.\n"
         "2. Elegí si querés descargar solo audio 🎵 o video completo 🎬.\n"
         "3. Te enviaré el archivo correspondiente.\n\n"
+        "📱 INSTAGRAM:\n"
+        "Enviame un link de Instagram y te mando el video automáticamente.\n\n"
         "Usá /start para ver estas instrucciones de nuevo."
     )
     await update.message.reply_text(mensaje_bienvenida)
@@ -30,7 +39,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if is_youtube_url(mensaje):
         await handle_youtube_link(update, context)
         return
-    
+
+    # Verificar si es un link de Instagram
+    if is_instagram_url(mensaje):
+        await handle_instagram_video(update, context)
+        return
+
+    # Si es otra URL, informar que no está soportada
+    if mensaje and URL_REGEX.search(mensaje):
+        await update.message.reply_text("⚠️ Solo puedo descargar de YouTube o Instagram.")
+        return
+
     # Inicializar historial para el usuario si no existe
     if user_id not in historias:
         historias[user_id] = []
