@@ -252,11 +252,11 @@ def download_with_selenium(video_url: str, format_type: str = 'mp3') -> dict:
             print(f"[ERROR] No se encontró el input: {e}")
             return {'success': False, 'error': 'No se encontró el campo de entrada'}
         
-        # Paso 2: Si queremos MP4, hacer clic en botón id="f" (toggle mp3/mp4)
+        # Paso 2: Si queremos MP4, hacer clic en botón id="format" (toggle mp3/mp4)
         if format_type == 'mp4':
             print("[DEBUG] Cambiando a modo MP4...")
             try:
-                format_button = driver.find_element(By.ID, 'f')
+                format_button = driver.find_element(By.ID, 'format')
                 driver.execute_script("arguments[0].click();", format_button)
                 time.sleep(1)
                 print("[DEBUG] Modo cambiado a MP4")
