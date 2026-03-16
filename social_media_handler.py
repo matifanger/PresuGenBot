@@ -196,10 +196,10 @@ async def handle_instagram_video(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def download_instagram_video(url: str) -> str:
-    """Descarga video de Instagram usando yt-dlp + Selenium para cookies."""
-    import yt_dlp
-    import tempfile
-    import subprocess
+    """Descarga video de Instagram usando fastdl.app."""
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
     
     shortcode = _extract_instagram_shortcode(url)
     if not shortcode:
@@ -208,9 +208,10 @@ def download_instagram_video(url: str) -> str:
     _ensure_download_dir()
     
     download_dir = DOWNLOAD_DIR
+    driver = None
     
     try:
-        print(f"[INFO] Descargando reel {shortcode}...")
+        print(f"[INFO] Descargando reel {shortcode} desde fastdl.app...")
         
         # Limpiar directorio
         if os.path.exists(download_dir):
@@ -221,112 +222,101 @@ def download_instagram_video(url: str) -> str:
                 except:
                     pass
         
-        output_template = os.path.join(download_dir, 'instagram_%(id)s.%(ext)s')
+        driver = _create_instagram_driver(download_dir)
+        if not driver:
+            raise RuntimeError("No se pudo iniciar el navegador")
         
-        # Primer intento: sin cookies
-        ydl_opts = {
-            'format': 'best[ext=mp4]/best',
-            'outtmpl': output_template,
-            'no_warnings': True,
-            'quiet': True,
-        }
+        print(f"[DEBUG] Navegando a fastdl.app...")
+        driver.get("https://fastdl.app/en")
+        time.sleep(2)
         
-        print(f"[DEBUG] Attempt 1: sin cookies...")
+        # Buscar input y meter la URL
+        print(f"[DEBUG] Buscando input...")
+        search_input = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.ID, "search-form-input"))
+        )
+        search_input.clear()
+        search_input.send_keys(url)
+        print(f"[DEBUG] URL ingresada: {url}")
         
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        except Exception as e:
-            print(f"[DEBUG] Attempt 1 falló: {e}")
-            
-            # Segundo intento: obtener cookies con Selenium y pasarlas a yt-dlp
-            print(f"[DEBUG] Attempt 2: usando Selenium para cookies...")
-            driver = None
-            cookies_file = None
-            
+        # Click en Download
+        print(f"[DEBUG] Click en Download...")
+        download_button = driver.find_element(By.ID, "searchFormButton")
+        download_button.click()
+        
+        # Esperar que desaparezca el mensaje de loading
+        print(f"[DEBUG] Esperando descarga...")
+        loading_selector = ".loader-component__message"
+        
+        for i in range(60):
+            time.sleep(1)
             try:
-                driver = _create_instagram_driver(download_dir)
-                if driver:
-                    print(f"[DEBUG] Navegando a Instagram...")
-                    driver.get(url)
-                    time.sleep(5)
-                    
-                    # Exportar cookies
-                    cookies = driver.get_cookies()
-                    if cookies:
-                        cookies_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
-                        cookies_file.write("# Netscape HTTP Cookie File\n\n")
-                        
-                        for cookie in cookies:
-                            domain = cookie.get('domain', '')
-                            flag = 'TRUE' if domain.startswith('.') else 'FALSE'
-                            path = cookie.get('path', '/')
-                            secure = 'TRUE' if cookie.get('secure', False) else 'FALSE'
-                            expiration = str(int(cookie.get('expiration', 0)))
-                            name = cookie.get('name', '')
-                            value = cookie.get('value', '')
-                            cookies_file.write(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}\n")
-                        
-                        cookies_file.close()
-                        print(f"[DEBUG] Cookies guardadas: {cookies_file.name}")
-            finally:
-                if driver:
-                    try:
-                        driver.quit()
-                    except:
-                        pass
+                loading = driver.find_elements(By.CSS_SELECTOR, loading_selector)
+                if not loading or not loading[0].is_displayed():
+                    print(f"[DEBUG] Loading terminado")
+                    break
+                if i % 10 == 0:
+                    print(f"[DEBUG] Esperando... ({i}s)")
+            except:
+                break
+        
+        # Buscar botón de descarga
+        print(f"[DEBUG] Buscando botón de descarga...")
+        download_link = None
+        
+        for i in range(30):
+            try:
+                buttons = driver.find_elements(By.CSS_SELECTOR, "a.button__download")
+                for btn in buttons:
+                    href = btn.get_attribute('href')
+                    if href and 'fastdl.app' in href:
+                        download_link = href
+                        print(f"[DEBUG] Found download link: {href[:80]}...")
+                        break
+                if download_link:
+                    break
+            except:
+                pass
             
-            if cookies_file:
-                # Ejecutar yt-dlp con cookies
-                cmd = [
-                    'yt-dlp',
-                    '-f', 'best[ext=mp4]/best',
-                    '-o', output_template,
-                    '--no-warnings',
-                    '--cookies', cookies_file.name,
-                    url
-                ]
-                
-                print(f"[DEBUG] Ejecutando yt-dlp con cookies...")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-                
-                # Limpiar archivo de cookies
-                try:
-                    os.unlink(cookies_file.name)
-                except:
-                    pass
-                
-                if result.returncode != 0:
-                    print(f"[DEBUG] yt-dlp stderr: {result.stderr}")
-                    raise RuntimeError(f"yt-dlp falló: {result.stderr}")
-            else:
-                raise RuntimeError("No se pudieron obtener las cookies")
+            if i % 5 == 0:
+                print(f"[DEBUG] Buscando botón... ({i}s)")
+            time.sleep(1)
         
-        # Buscar archivo descargado
-        expected_file = os.path.join(download_dir, f'instagram_{shortcode}.mp4')
+        if not download_link:
+            driver.quit()
+            raise RuntimeError("No se encontró el botón de descarga")
         
-        if os.path.exists(expected_file):
-            file_size = os.path.getsize(expected_file)
-            if file_size > 1000:
-                print(f"[DEBUG] Video: {expected_file} ({file_size} bytes)")
-                return expected_file
+        # Descargar el archivo
+        print(f"[DEBUG] Descargando desde: {download_link[:80]}...")
         
-        # Buscar cualquier mp4
-        mp4_files = [f for f in os.listdir(download_dir) if f.endswith('.mp4')]
-        if mp4_files:
-            latest = os.path.join(download_dir, mp4_files[0])
-            if os.path.getsize(latest) > 1000:
-                print(f"[DEBUG] Video: {latest}")
-                return latest
+        response = requests.get(download_link, stream=True, timeout=120, headers=DEFAULT_HEADERS)
+        response.raise_for_status()
         
-        raise RuntimeError("No se encontró el video")
+        filename = f"instagram_{shortcode}.mp4"
+        file_path = os.path.join(download_dir, filename)
+        
+        with open(file_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    f.write(chunk)
+        
+        driver.quit()
+        
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 1000:
+            print(f"[DEBUG] Video descargado: {file_path} ({os.path.getsize(file_path)} bytes)")
+            return file_path
+        
+        raise RuntimeError("El archivo descargado está vacío")
         
     except Exception as e:
         print(f"[ERROR] Error: {e}")
-        import traceback
-        traceback.print_exc()
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
         raise RuntimeError(f"Error descargando video: {e}")
-
+        
 
 def _extract_instagram_shortcode(url: str) -> Optional[str]:
     match = INSTAGRAM_SHORTCODE_REGEX.search(url)
