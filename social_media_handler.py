@@ -264,7 +264,7 @@ def download_instagram_video(url: str) -> str:
         print(f"[DEBUG] Buscando botón de descarga...")
         download_link = None
         
-        for i in range(150):
+        for i in range(90):
             try:
                 buttons = driver.find_elements(By.CSS_SELECTOR, "a.button__download")
                 for btn in buttons:
@@ -317,6 +317,37 @@ def download_instagram_video(url: str) -> str:
                 pass
         raise RuntimeError(f"Error descargando video: {e}")
         
+        # Descargar el archivo
+        print(f"[DEBUG] Descargando desde: {download_link[:80]}...")
+        
+        response = requests.get(download_link, stream=True, timeout=120, headers=DEFAULT_HEADERS)
+        response.raise_for_status()
+        
+        filename = f"instagram_{shortcode}.mp4"
+        file_path = os.path.join(download_dir, filename)
+        
+        with open(file_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=256 * 1024):
+                if chunk:
+                    f.write(chunk)
+        
+        driver.quit()
+        
+        if os.path.exists(file_path) and os.path.getsize(file_path) > 1000:
+            print(f"[DEBUG] Video descargado: {file_path} ({os.path.getsize(file_path)} bytes)")
+            return file_path
+        
+        raise RuntimeError("El archivo descargado está vacío")
+        
+    except Exception as e:
+        print(f"[ERROR] Error: {e}")
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
+        raise RuntimeError(f"Error descargando video: {e}")
+
 
 def _extract_instagram_shortcode(url: str) -> Optional[str]:
     match = INSTAGRAM_SHORTCODE_REGEX.search(url)
