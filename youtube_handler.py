@@ -13,8 +13,12 @@ from webdriver_manager.chrome import ChromeDriverManager
 from selenium.common.exceptions import TimeoutException
 from urllib.parse import urlparse
 
-def is_youtube_url(url: str) -> bool:
+from typing import Optional
+
+def is_youtube_url(url: Optional[str]) -> bool:
     """Verifica si la URL es de YouTube"""
+    if not url:
+        return False
     youtube_regex = r'(https?://)?(www\.)?(youtube|youtu|youtube-nocookie)\.(com|be)/(watch\?v=|embed/|v/|.+\?v=)?([^&=%\?]{11})'
     return bool(re.match(youtube_regex, url))
 

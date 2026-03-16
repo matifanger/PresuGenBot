@@ -1,13 +1,20 @@
 import logging
 import os
 import re
+import time
 from typing import Optional
 
 import requests
-from instaloader import Instaloader, Post
-from instaloader.exceptions import InstaloaderException
 from telegram import Update
 from telegram.ext import ContextTypes
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+from urllib.parse import urlparse
 
 DOWNLOAD_DIR = os.path.abspath('downloads')
 MAX_TELEGRAM_FILE_SIZE = 50 * 1024 * 1024  # 50 MB (límite bots Telegram)
@@ -26,10 +33,135 @@ INSTAGRAM_SHORTCODE_REGEX = re.compile(
 INSTAGRAM_URL_REGEX = re.compile(r"instagram\.com/([A-Za-z0-9_\-]+)", re.IGNORECASE)
 
 
-def is_instagram_url(text: str) -> bool:
+def is_instagram_url(text: Optional[str]) -> bool:
     if not text:
         return False
     return bool(INSTAGRAM_URL_REGEX.search(text.strip()))
+
+
+def _parse_proxy_from_env():
+    """Lee PROXY_FULL del entorno y devuelve un dict con partes o None si no hay proxy."""
+    proxy_full = os.getenv('PROXY_FULL') or os.getenv('PROXY_URL') or os.getenv('PROXY')
+    if not proxy_full:
+        return None
+
+    try:
+        parsed = urlparse(proxy_full)
+        protocol = parsed.scheme or 'http'
+        username = parsed.username or ''
+        password = parsed.password or ''
+        server = parsed.hostname or ''
+        port = parsed.port or 80
+
+        full = f"{protocol}://{username}:{password}@{server}:{port}"
+
+        return {
+            'server': server,
+            'port': port,
+            'username': username,
+            'password': password,
+            'protocol': protocol,
+            'full': full,
+        }
+    except Exception:
+        return None
+
+
+def _create_instagram_driver(download_path=None, use_wire=True):
+    """Crea un driver de Chrome para Instagram."""
+    try:
+        if download_path:
+            os.makedirs(download_path, exist_ok=True)
+            download_path = os.path.abspath(download_path)
+        else:
+            download_path = os.path.abspath('downloads')
+            os.makedirs(download_path, exist_ok=True)
+        
+        chrome_options = Options()
+        chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
+        
+        prefs = {
+            "download.default_directory": download_path,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": True
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        
+        proxy_cfg = _parse_proxy_from_env()
+        
+        # Siempre usar seleniumwire para capturar requests
+        from seleniumwire import webdriver as wire_webdriver
+        
+        seleniumwire_options = {}
+        
+        if proxy_cfg and proxy_cfg.get('server'):
+            chrome_options.add_argument(f"--proxy-server={proxy_cfg['protocol']}://{proxy_cfg['server']}:{proxy_cfg['port']}")
+            seleniumwire_options = {
+                'proxy': {
+                    'http': proxy_cfg['full'],
+                    'https': proxy_cfg['full'],
+                },
+            }
+            masked = f"{proxy_cfg['protocol']}://{proxy_cfg['username']}:****@{proxy_cfg['server']}:{proxy_cfg['port']}"
+            print(f"[DEBUG] Instagram driver con proxy: {masked}")
+        
+        service = Service(ChromeDriverManager().install())
+        
+        if seleniumwire_options:
+            driver = wire_webdriver.Chrome(service=service, options=chrome_options, seleniumwire_options=seleniumwire_options)
+        else:
+            driver = wire_webdriver.Chrome(service=service, options=chrome_options)
+        
+        try:
+            driver.set_page_load_timeout(300)
+            driver.set_script_timeout(300)
+        except Exception:
+            pass
+
+        print(f"[DEBUG] Instagram driver creado: {download_path}")
+        return driver
+        
+    except Exception as e:
+        print(f"[ERROR] No se pudo crear el driver: {e}")
+        return None
+
+
+def _wait_for_instagram_download(download_dir, timeout=180):
+    """Espera a que termine la descarga en el directorio."""
+    print(f"[DEBUG] Esperando descarga en: {download_dir}")
+    
+    for seconds in range(timeout):
+        files = os.listdir(download_dir)
+        
+        downloading = any(f.endswith(('.crdownload', '.tmp', '.part')) for f in files)
+        
+        if downloading:
+            if seconds % 10 == 0:
+                print(f"[DEBUG] Descarga en progreso... ({seconds}s/{timeout}s)")
+        elif files:
+            non_temp_files = [f for f in files if not f.endswith(('.crdownload', '.tmp', '.part'))]
+            if non_temp_files:
+                non_temp_files.sort(
+                    key=lambda x: os.path.getmtime(os.path.join(download_dir, x)),
+                    reverse=True
+                )
+                latest_file = os.path.join(download_dir, non_temp_files[0])
+                if os.path.getsize(latest_file) > 0:
+                    print(f"[DEBUG] Descarga completada: {non_temp_files[0]}")
+                    return latest_file
+        
+        time.sleep(1)
+    
+    print("[ERROR] Timeout esperando descarga")
+    return None
 
 
 async def handle_instagram_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -64,38 +196,81 @@ async def handle_instagram_video(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def download_instagram_video(url: str) -> str:
-    """Obtiene el video de Instagram empleando Instaloader."""
+    """Descarga video de Instagram usando yt-dlp."""
+    import subprocess
+    
     shortcode = _extract_instagram_shortcode(url)
     if not shortcode:
         raise ValueError("No pude identificar el reel/post de Instagram.")
 
     _ensure_download_dir()
-    loader = _build_instaloader()
-
+    
+    download_dir = DOWNLOAD_DIR
+    
     try:
-        post = Post.from_shortcode(loader.context, shortcode)
-    except InstaloaderException as exc:
-        raise RuntimeError(f"No pude acceder al contenido: {exc}") from exc
-
-    video_url = _resolve_instagram_video_url(post)
-    if not video_url:
-        raise RuntimeError("El enlace no contiene un video descargable.")
-
-    filename = f"instagram_{shortcode}.mp4"
-    file_path = os.path.join(DOWNLOAD_DIR, filename)
-
-    try:
-        response = requests.get(video_url, stream=True, timeout=120, headers=DEFAULT_HEADERS)
-        response.raise_for_status()
-        with open(file_path, "wb") as file:
-            for chunk in response.iter_content(chunk_size=256 * 1024):
-                if chunk:
-                    file.write(chunk)
-    except Exception as exc:
-        _safe_remove(file_path)
-        raise RuntimeError(f"No pude descargar el video: {exc}") from exc
-
-    return file_path
+        print(f"[INFO] Descargando reel {shortcode} con yt-dlp...")
+        
+        if os.path.exists(download_dir):
+            for file in os.listdir(download_dir):
+                try:
+                    if file.endswith('.mp4'):
+                        os.remove(os.path.join(download_dir, file))
+                except:
+                    pass
+        
+        # Configurar yt-dlp
+        output_template = os.path.join(download_dir, 'instagram_%(id)s.%(ext)s')
+        
+        # Armar comando
+        cmd = [
+            'yt-dlp',
+            '-f', 'best[ext=mp4]/best',
+            '-o', output_template,
+            '--no-warnings',
+            '--no-check-certificate',
+            url
+        ]
+        
+        print(f"[DEBUG] Ejecutando: {' '.join(cmd)}")
+        
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
+        
+        print(f"[DEBUG] yt-dlp stdout: {result.stdout}")
+        if result.stderr:
+            print(f"[DEBUG] yt-dlp stderr: {result.stderr}")
+        
+        if result.returncode != 0:
+            raise RuntimeError(f"yt-dlp falló: {result.stderr}")
+        
+        # Buscar el archivo descargado
+        expected_file = os.path.join(download_dir, f'instagram_{shortcode}.mp4')
+        
+        if os.path.exists(expected_file):
+            file_size = os.path.getsize(expected_file)
+            print(f"[DEBUG] Video descargado: {expected_file} ({file_size} bytes)")
+            return expected_file
+        
+        # Buscar cualquier archivo mp4 nuevo
+        mp4_files = [f for f in os.listdir(download_dir) if f.endswith('.mp4')]
+        if mp4_files:
+            latest = os.path.join(download_dir, mp4_files[0])
+            print(f"[DEBUG] Video encontrado: {latest}")
+            return latest
+        
+        raise RuntimeError("No se encontró el video descargado")
+        
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Timeout descargando video")
+    except Exception as e:
+        print(f"[ERROR] Error descargando video: {e}")
+        import traceback
+        traceback.print_exc()
+        raise RuntimeError(f"Error descargando video: {e}")
 
 
 def _extract_instagram_shortcode(url: str) -> Optional[str]:
@@ -107,32 +282,6 @@ def _extract_instagram_shortcode(url: str) -> Optional[str]:
 
 def _ensure_download_dir():
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-
-def _build_instaloader() -> Instaloader:
-    loader = Instaloader(
-        dirname_pattern=DOWNLOAD_DIR,
-        download_video_thumbnails=False,
-        download_geotags=False,
-        save_metadata=False,
-        download_comments=False,
-        post_metadata_txt_pattern="",
-    )
-    loader.quiet = True
-    logging.getLogger("instaloader").setLevel(logging.WARNING)
-    return loader
-
-
-def _resolve_instagram_video_url(post: Post) -> Optional[str]:
-    if post.is_video:
-        return post.video_url
-
-    if post.typename == "GraphSidecar":
-        for node in post.get_sidecar_nodes():
-            if node.is_video:
-                return node.video_url
-
-    return None
 
 
 async def _send_video_file(context: ContextTypes.DEFAULT_TYPE, chat_id: int, file_path: str):
@@ -153,4 +302,3 @@ def _safe_remove(path: Optional[str]):
             os.remove(path)
         except OSError:
             pass
-
