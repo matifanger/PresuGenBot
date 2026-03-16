@@ -4,7 +4,7 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Install WeasyPrint dependencies and Chrome for Selenium
+# Install WeasyPrint dependencies, Chrome, and yt-dlp
 RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libharfbuzz0b \
@@ -26,6 +26,10 @@ RUN apt-get update && apt-get install -y \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
+
+# Install yt-dlp system-wide
+RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
+    && chmod a+rx /usr/local/bin/yt-dlp
 
 WORKDIR /app
 
