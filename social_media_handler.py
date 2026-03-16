@@ -196,8 +196,10 @@ async def handle_instagram_video(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def download_instagram_video(url: str) -> str:
-    """Descarga video de Instagram usando yt-dlp."""
+    """Descarga video de Instagram usando yt-dlp + Selenium para cookies."""
     import yt_dlp
+    import tempfile
+    import subprocess
     
     shortcode = _extract_instagram_shortcode(url)
     if not shortcode:
@@ -208,7 +210,7 @@ def download_instagram_video(url: str) -> str:
     download_dir = DOWNLOAD_DIR
     
     try:
-        print(f"[INFO] Descargando reel {shortcode} con yt-dlp...")
+        print(f"[INFO] Descargando reel {shortcode}...")
         
         # Limpiar directorio
         if os.path.exists(download_dir):
@@ -221,43 +223,84 @@ def download_instagram_video(url: str) -> str:
         
         output_template = os.path.join(download_dir, 'instagram_%(id)s.%(ext)s')
         
+        # Primer intento: sin cookies
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'outtmpl': output_template,
             'no_warnings': True,
             'quiet': True,
-            'nocheckcertificate': True,
-            # Intentar sin cookies primero (funciona para contenido público)
-            # Si falla, el error будет capturado
         }
         
-        print(f"[DEBUG] Descargando con yt-dlp...")
+        print(f"[DEBUG] Attempt 1: sin cookies...")
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
-            print(f"[DEBUG] Primer intento falló: {e}")
+            print(f"[DEBUG] Attempt 1 falló: {e}")
             
-            # Si falló, intentar con --cookies-from-browser usando subprocess
-            print(f"[DEBUG] Intentando con cookies-from-browser...")
-            import subprocess
+            # Segundo intento: obtener cookies con Selenium y pasarlas a yt-dlp
+            print(f"[DEBUG] Attempt 2: usando Selenium para cookies...")
+            driver = None
+            cookies_file = None
             
-            cmd = [
-                'yt-dlp',
-                '-f', 'best[ext=mp4]/best',
-                '-o', output_template,
-                '--no-warnings',
-                '--no-check-certificate',
-                '--cookies-from-browser', 'chrome',
-                url
-            ]
+            try:
+                driver = _create_instagram_driver(download_dir)
+                if driver:
+                    print(f"[DEBUG] Navegando a Instagram...")
+                    driver.get(url)
+                    time.sleep(5)
+                    
+                    # Exportar cookies
+                    cookies = driver.get_cookies()
+                    if cookies:
+                        cookies_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+                        cookies_file.write("# Netscape HTTP Cookie File\n\n")
+                        
+                        for cookie in cookies:
+                            domain = cookie.get('domain', '')
+                            flag = 'TRUE' if domain.startswith('.') else 'FALSE'
+                            path = cookie.get('path', '/')
+                            secure = 'TRUE' if cookie.get('secure', False) else 'FALSE'
+                            expiration = str(int(cookie.get('expiration', 0)))
+                            name = cookie.get('name', '')
+                            value = cookie.get('value', '')
+                            cookies_file.write(f"{domain}\t{flag}\t{path}\t{secure}\t{expiration}\t{name}\t{value}\n")
+                        
+                        cookies_file.close()
+                        print(f"[DEBUG] Cookies guardadas: {cookies_file.name}")
+            finally:
+                if driver:
+                    try:
+                        driver.quit()
+                    except:
+                        pass
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
-            
-            if result.returncode != 0:
-                print(f"[DEBUG] yt-dlp stderr: {result.stderr}")
-                raise RuntimeError(f"yt-dlp falló: {result.stderr}")
+            if cookies_file:
+                # Ejecutar yt-dlp con cookies
+                cmd = [
+                    'yt-dlp',
+                    '-f', 'best[ext=mp4]/best',
+                    '-o', output_template,
+                    '--no-warnings',
+                    '--cookies', cookies_file.name,
+                    url
+                ]
+                
+                print(f"[DEBUG] Ejecutando yt-dlp con cookies...")
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+                
+                # Limpiar archivo de cookies
+                try:
+                    os.unlink(cookies_file.name)
+                except:
+                    pass
+                
+                if result.returncode != 0:
+                    print(f"[DEBUG] yt-dlp stderr: {result.stderr}")
+                    raise RuntimeError(f"yt-dlp falló: {result.stderr}")
+            else:
+                raise RuntimeError("No se pudieron obtener las cookies")
         
         # Buscar archivo descargado
         expected_file = os.path.join(download_dir, f'instagram_{shortcode}.mp4')
@@ -265,7 +308,7 @@ def download_instagram_video(url: str) -> str:
         if os.path.exists(expected_file):
             file_size = os.path.getsize(expected_file)
             if file_size > 1000:
-                print(f"[DEBUG] Video descargado: {expected_file} ({file_size} bytes)")
+                print(f"[DEBUG] Video: {expected_file} ({file_size} bytes)")
                 return expected_file
         
         # Buscar cualquier mp4
@@ -273,10 +316,10 @@ def download_instagram_video(url: str) -> str:
         if mp4_files:
             latest = os.path.join(download_dir, mp4_files[0])
             if os.path.getsize(latest) > 1000:
-                print(f"[DEBUG] Video encontrado: {latest}")
+                print(f"[DEBUG] Video: {latest}")
                 return latest
         
-        raise RuntimeError("No se encontró el video descargado")
+        raise RuntimeError("No se encontró el video")
         
     except Exception as e:
         print(f"[ERROR] Error: {e}")
