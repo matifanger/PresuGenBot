@@ -264,7 +264,7 @@ def download_instagram_video(url: str) -> str:
         print(f"[DEBUG] Buscando botón de descarga...")
         download_link = None
         
-        for i in range(30):
+        for i in range(150):
             try:
                 buttons = driver.find_elements(By.CSS_SELECTOR, "a.button__download")
                 for btn in buttons:
