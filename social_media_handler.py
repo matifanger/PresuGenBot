@@ -196,7 +196,7 @@ async def handle_instagram_video(update: Update, context: ContextTypes.DEFAULT_T
 
 
 def download_instagram_video(url: str) -> str:
-    """Descarga video de Instagram usando fastdl.app."""
+    """Descarga video de Instagram usando fastvideosave.net."""
     from selenium.webdriver.common.by import By
     from selenium.webdriver.support.ui import WebDriverWait
     from selenium.webdriver.support import expected_conditions as EC
@@ -211,9 +211,8 @@ def download_instagram_video(url: str) -> str:
     driver = None
     
     try:
-        print(f"[INFO] Descargando reel {shortcode} desde fastdl.app...")
+        print(f"[INFO] Descargando reel {shortcode} desde fastvideosave.net...")
         
-        # Limpiar directorio
         if os.path.exists(download_dir):
             for file in os.listdir(download_dir):
                 try:
@@ -226,14 +225,14 @@ def download_instagram_video(url: str) -> str:
         if not driver:
             raise RuntimeError("No se pudo iniciar el navegador")
         
-        print(f"[DEBUG] Navegando a fastdl.app...")
-        driver.get("https://fastdl.app/en")
-        time.sleep(2)
+        print(f"[DEBUG] Navegando a fastvideosave.net...")
+        driver.get("https://fastvideosave.net/video")
+        time.sleep(3)
         
         # Buscar input y meter la URL
         print(f"[DEBUG] Buscando input...")
-        search_input = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.ID, "search-form-input"))
+        search_input = WebDriverWait(driver, 15).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "input[type='url'][name='url']"))
         )
         search_input.clear()
         search_input.send_keys(url)
@@ -241,37 +240,51 @@ def download_instagram_video(url: str) -> str:
         
         # Click en Download
         print(f"[DEBUG] Click en Download...")
-        download_button = driver.find_element(By.ID, "searchFormButton")
+        download_button = driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
         download_button.click()
         
-        # Esperar que desaparezca el mensaje de loading
-        print(f"[DEBUG] Esperando descarga...")
-        loading_selector = ".loader-component__message"
-        
-        for i in range(60):
-            time.sleep(1)
-            try:
-                loading = driver.find_elements(By.CSS_SELECTOR, loading_selector)
-                if not loading or not loading[0].is_displayed():
-                    print(f"[DEBUG] Loading terminado")
-                    break
-                if i % 10 == 0:
-                    print(f"[DEBUG] Esperando... ({i}s)")
-            except:
-                break
-        
-        # Buscar botón de descarga
-        print(f"[DEBUG] Buscando botón de descarga...")
-        download_link = None
+        # Esperar que aparezca el botón de descarga del video
+        print(f"[DEBUG] Esperando botón de descarga del video...")
+        download_video_button = None
         
         for i in range(90):
             try:
-                buttons = driver.find_elements(By.CSS_SELECTOR, "a.button__download")
+                buttons = driver.find_elements(By.CSS_SELECTOR, "button svg path[d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4m4-5 5 5 5-5m-5 5V3']")
                 for btn in buttons:
-                    href = btn.get_attribute('href')
-                    if href and 'fastdl.app' in href:
+                    parent = btn.find_element(By.XPATH, "./ancestor::button")
+                    if parent and "Download Video" in parent.text:
+                        download_video_button = parent
+                        print(f"[DEBUG] Botón Download Video encontrado")
+                        break
+                if download_video_button:
+                    break
+            except:
+                pass
+            
+            if i % 5 == 0:
+                print(f"[DEBUG] Buscando botón Download Video... ({i}s)")
+            time.sleep(1)
+        
+        if not download_video_button:
+            driver.quit()
+            raise RuntimeError("No se encontró el botón de Download Video")
+        
+        # Obtener el href del botón o hacer clic
+        download_video_button.click()
+        time.sleep(2)
+        
+        # Buscar el enlace de descarga
+        print(f"[DEBUG] Buscando enlace de descarga...")
+        download_link = None
+        
+        for i in range(30):
+            try:
+                links = driver.find_elements(By.CSS_SELECTOR, "a[href*='.mp4'], a[href*='download']")
+                for link in links:
+                    href = link.get_attribute('href')
+                    if href and ('.mp4' in href or 'download' in href) and 'fastvideosave' in href:
                         download_link = href
-                        print(f"[DEBUG] Found download link: {href[:80]}...")
+                        print(f"[DEBUG] Enlace encontrado: {href[:80]}...")
                         break
                 if download_link:
                     break
@@ -279,17 +292,32 @@ def download_instagram_video(url: str) -> str:
                 pass
             
             if i % 5 == 0:
-                print(f"[DEBUG] Buscando botón... ({i}s)")
+                print(f"[DEBUG] Buscando enlace... ({i}s)")
             time.sleep(1)
         
         if not download_link:
-            driver.quit()
-            raise RuntimeError("No se encontró el botón de descarga")
+            # Intentar obtener la URL actual que podría ser una redirect
+            current_url = driver.current_url
+            if current_url and '.mp4' in current_url:
+                download_link = current_url
+        
+        driver.quit()
+        
+        if not download_link:
+            raise RuntimeError("No se encontró el enlace de descarga")
         
         # Descargar el archivo
-        print(f"[DEBUG] Descargando desde: {download_link[:80]}...")
+        print(f"[DEBUG] Descargando desde: {download_link[:100]}...")
         
-        response = requests.get(download_link, stream=True, timeout=120, headers=DEFAULT_HEADERS)
+        proxy_cfg = _parse_proxy_from_env()
+        proxies = None
+        if proxy_cfg:
+            proxies = {
+                'http': proxy_cfg['full'],
+                'https': proxy_cfg['full'],
+            }
+        
+        response = requests.get(download_link, stream=True, timeout=120, headers=DEFAULT_HEADERS, proxies=proxies)
         response.raise_for_status()
         
         filename = f"instagram_{shortcode}.mp4"
@@ -299,39 +327,6 @@ def download_instagram_video(url: str) -> str:
             for chunk in response.iter_content(chunk_size=256 * 1024):
                 if chunk:
                     f.write(chunk)
-        
-        driver.quit()
-        
-        if os.path.exists(file_path) and os.path.getsize(file_path) > 1000:
-            print(f"[DEBUG] Video descargado: {file_path} ({os.path.getsize(file_path)} bytes)")
-            return file_path
-        
-        raise RuntimeError("El archivo descargado está vacío")
-        
-    except Exception as e:
-        print(f"[ERROR] Error: {e}")
-        if driver:
-            try:
-                driver.quit()
-            except:
-                pass
-        raise RuntimeError(f"Error descargando video: {e}")
-        
-        # Descargar el archivo
-        print(f"[DEBUG] Descargando desde: {download_link[:80]}...")
-        
-        response = requests.get(download_link, stream=True, timeout=120, headers=DEFAULT_HEADERS)
-        response.raise_for_status()
-        
-        filename = f"instagram_{shortcode}.mp4"
-        file_path = os.path.join(download_dir, filename)
-        
-        with open(file_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=256 * 1024):
-                if chunk:
-                    f.write(chunk)
-        
-        driver.quit()
         
         if os.path.exists(file_path) and os.path.getsize(file_path) > 1000:
             print(f"[DEBUG] Video descargado: {file_path} ({os.path.getsize(file_path)} bytes)")
