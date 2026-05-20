@@ -130,8 +130,7 @@ def _check_pot_server(url: str) -> bool:
 
 # --- Method 1: yt-dlp (with PO token if available) ---
 
-def _download_with_ytdlp(video_url: str, format_type: str = 'mp3') -> dict:
-    _clean_download_dir()
+def _build_ytdlp_opts(format_type: str, use_proxy: bool = False) -> dict:
     output_template = os.path.join(DOWNLOAD_DIR, '%(title).80s.%(ext)s')
 
     ydl_opts = {
@@ -143,31 +142,28 @@ def _download_with_ytdlp(video_url: str, format_type: str = 'mp3') -> dict:
         'no_warnings': True,
     }
 
-    proxy = _get_proxy_url()
-    if proxy:
-        ydl_opts['proxy'] = proxy
+    if use_proxy:
+        proxy = _get_proxy_url()
+        if proxy:
+            ydl_opts['proxy'] = proxy
 
     cookies_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cookies.txt')
     if os.path.exists(cookies_file):
         ydl_opts['cookiefile'] = cookies_file
 
-    ydl_opts.setdefault('extractor_args', {})
-    ydl_opts['extractor_args']['youtube'] = {
-        'player_client': ['web', 'mweb', 'android'],
+    ydl_opts['extractor_args'] = {
+        'youtube': {
+            'player_client': ['web', 'mweb', 'android'],
+        },
     }
 
     pot_url = os.getenv('POT_PROVIDER_URL')
     if pot_url:
         pot_ok = _check_pot_server(pot_url)
-        print(f"[INFO] PO Token server ({pot_url}): {'OK' if pot_ok else 'UNREACHABLE'}")
         if pot_ok:
             ydl_opts['extractor_args']['youtubepot-bgutilhttp'] = {
                 'base_url': [pot_url],
             }
-        else:
-            print("[WARN] PO Token server no responde, yt-dlp sin PO tokens")
-    else:
-        print("[INFO] POT_PROVIDER_URL no configurada, yt-dlp sin PO tokens")
 
     if format_type == 'mp3':
         ydl_opts['format'] = 'bestaudio/best'
@@ -184,8 +180,13 @@ def _download_with_ytdlp(video_url: str, format_type: str = 'mp3') -> dict:
         )
         ydl_opts['merge_output_format'] = 'mp4'
 
+    return ydl_opts
+
+
+def _run_ytdlp(video_url: str, ydl_opts: dict, format_type: str) -> dict:
+    _clean_download_dir()
+
     try:
-        print(f"[INFO] yt-dlp: descargando {format_type.upper()}...")
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.extract_info(video_url, download=True)
 
@@ -208,12 +209,39 @@ def _download_with_ytdlp(video_url: str, format_type: str = 'mp3') -> dict:
         return {'success': True, 'file_path': downloaded}
 
     except yt_dlp.utils.DownloadError as e:
-        error_msg = str(e)
-        print(f"[WARN] yt-dlp falló: {error_msg[:200]}")
-        return {'success': False, 'error': error_msg}
-    except Exception as e:
-        print(f"[WARN] yt-dlp error: {e}")
         return {'success': False, 'error': str(e)}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def _download_with_ytdlp(video_url: str, format_type: str = 'mp3') -> dict:
+    pot_url = os.getenv('POT_PROVIDER_URL')
+    if pot_url:
+        pot_ok = _check_pot_server(pot_url)
+        print(f"[INFO] PO Token server ({pot_url}): {'OK' if pot_ok else 'UNREACHABLE'}")
+
+    proxy = _get_proxy_url()
+
+    # Attempt 1: without proxy (direct IP + PO token)
+    print(f"[INFO] yt-dlp: descargando {format_type.upper()} (sin proxy)...")
+    opts = _build_ytdlp_opts(format_type, use_proxy=False)
+    result = _run_ytdlp(video_url, opts, format_type)
+    if result['success']:
+        return result
+
+    first_error = result.get('error', '')
+    print(f"[WARN] yt-dlp sin proxy falló: {first_error[:150]}")
+
+    # Attempt 2: with proxy (if configured)
+    if proxy:
+        print(f"[INFO] yt-dlp: reintentando con proxy...")
+        opts = _build_ytdlp_opts(format_type, use_proxy=True)
+        result = _run_ytdlp(video_url, opts, format_type)
+        if result['success']:
+            return result
+        print(f"[WARN] yt-dlp con proxy también falló: {result.get('error', '')[:150]}")
+
+    return {'success': False, 'error': first_error}
 
 
 # --- Method 2: Cobalt API ---
