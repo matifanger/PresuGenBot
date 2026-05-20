@@ -3,7 +3,6 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
-# Install WeasyPrint deps and ffmpeg (for yt-dlp audio/video merging)
 RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libharfbuzz0b \
@@ -17,12 +16,13 @@ RUN apt-get update && apt-get install -y \
     wget \
     ca-certificates \
     curl \
+    unzip \
     ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-# Install yt-dlp binary
-RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
-    && chmod a+rx /usr/local/bin/yt-dlp
+# Deno JS runtime (required by yt-dlp for YouTube n-challenge solving)
+RUN curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
+    && deno --version
 
 WORKDIR /app
 
