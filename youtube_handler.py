@@ -122,20 +122,52 @@ def _should_skip_fallback(error_msg: str) -> bool:
 
 # --- Method 1: y2mate.nu API (conversion done on their servers, works from any IP) ---
 
+_Y2MATE_KEY_CACHE: dict = {'key': None, 'ts': 0}
+
+
 def _get_y2mate_key() -> Optional[str]:
-    """Fetch the Bearer key from y2mate.nu's page."""
-    try:
-        r = http_requests.get(Y2MATE_PAGE_URL, timeout=10, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        })
-        if r.status_code != 200:
-            return None
-        match = re.search(r'data-key="([^"]+)"', r.text)
-        if match:
-            return base64.b64decode(match.group(1)).decode()
-    except Exception:
-        pass
-    return None
+    """Fetch the Bearer key from y2mate.nu's page, with cache and fallback."""
+    now = time.time()
+    if _Y2MATE_KEY_CACHE['key'] and now - _Y2MATE_KEY_CACHE['ts'] < 3600:
+        return _Y2MATE_KEY_CACHE['key']
+
+    headers_list = [
+        {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+        },
+        {
+            'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+    ]
+
+    for headers in headers_list:
+        try:
+            r = http_requests.get(Y2MATE_PAGE_URL, timeout=15, headers=headers)
+            if r.status_code == 200:
+                match = re.search(r'data-key="([^"]+)"', r.text)
+                if match:
+                    key = base64.b64decode(match.group(1)).decode()
+                    _Y2MATE_KEY_CACHE['key'] = key
+                    _Y2MATE_KEY_CACHE['ts'] = now
+                    print(f"[INFO] y2mate: API key obtenida dinámicamente")
+                    return key
+            print(f"[WARN] y2mate page: HTTP {r.status_code}, len={len(r.text)}")
+        except Exception as e:
+            print(f"[WARN] y2mate page fetch error: {str(e)[:100]}")
+
+    fallback_key = os.getenv('Y2MATE_KEY', 'ZfXF1SS9jwF8Uf0F')
+    print(f"[WARN] y2mate: usando fallback key")
+    return fallback_key
 
 
 def _download_with_y2mate(video_url: str, format_type: str = 'mp3') -> dict:
