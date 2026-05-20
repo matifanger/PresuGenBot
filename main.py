@@ -13,8 +13,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 def _update_ytdlp():
     try:
         result = subprocess.run(
-            ['pip', 'install', '-U', 'yt-dlp[default]'],
-            capture_output=True, text=True, timeout=60
+            ['pip', 'install', '-U', '--pre', 'yt-dlp[default]'],
+            capture_output=True, text=True, timeout=120
         )
         for line in result.stdout.splitlines():
             if 'Successfully installed' in line:
