@@ -3,6 +3,7 @@ services:
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     restart: unless-stopped
     init: true
+    mem_limit: 256m
     healthcheck:
       test: ["CMD-SHELL", "node -e \"const h=require('http');h.get('http://localhost:4416/',r=>{process.exit(r.statusCode<500?0:1)}).on('error',()=>process.exit(1))\""]
       interval: 15s
@@ -19,6 +20,7 @@ services:
     environment:
       - POT_PROVIDER_URL=http://pot-provider:4416
     restart: unless-stopped
+    mem_limit: 192m
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f 'python main.py' || exit 1"]
       interval: 30s
